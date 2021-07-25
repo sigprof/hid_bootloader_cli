@@ -36,18 +36,17 @@
 void usage(const char *err)
 {
 	if(err != NULL) fprintf(stderr, "%s\n\n", err);
-	fprintf(stderr,
-		"Usage: teensy_loader_cli --mcu=<MCU> [-w] [-h] [-n] [-b] [-v] <file.hex>\n"
-		"\t-w : Wait for device to appear\n"
-		"\t-r : Use hard reboot if device not online\n"
-		"\t-s : Use soft reboot if device not online (Teensy 3.x & 4.x)\n"
-		"\t-n : No reboot after programming\n"
-		"\t-b : Boot only, do not program\n"
-		"\t-v : Verbose output\n"
-		"\nUse `teensy_loader_cli --list-mcus` to list supported MCUs.\n"
-		"\nFor more information, please visit:\n"
-		"http://www.pjrc.com/teensy/loader_cli.html\n");
-	exit(1);
+    fprintf(stderr, "Usage: hid_bootloader_cli --mcu=<MCU> [-w] [-h] [-n] [-b] [-v] <file.hex>\n"
+                    "\t-w : Wait for device to appear\n"
+                    "\t-r : Use hard reboot if device not online\n"
+                    "\t-s : Use soft reboot if device not online (Teensy 3.x & 4.x)\n"
+                    "\t-n : No reboot after programming\n"
+                    "\t-b : Boot only, do not program\n"
+                    "\t-v : Verbose output\n"
+                    "\nUse `hid_bootloader_cli --list-mcus` to list supported MCUs.\n"
+                    "\nFor more information, please visit:\n"
+                    "http://www.pjrc.com/teensy/loader_cli.html\n");
+    exit(1);
 }
 
 // USB Access Functions
@@ -102,9 +101,9 @@ int main(int argc, char **argv)
 	if (!code_size) {
 		usage("MCU type must be specified");
 	}
-	printf_verbose("Teensy Loader, Command Line, Version 2.2\n");
+    printf_verbose("Drashna\'s HID Bootloader, Command Line, Version 2.2\n");
 
-	if (block_size == 512 || block_size == 1024) {
+    if (block_size == 512 || block_size == 1024) {
 		write_size = block_size + 64;
 	} else {
 		write_size = block_size + 2;
@@ -137,15 +136,15 @@ int main(int argc, char **argv)
 		}
 		if (!wait_for_device_to_appear) die("Unable to open device (hint: try -w option)\n");
 		if (!waited) {
-			printf_verbose("Waiting for Teensy device...\n");
-			printf_verbose(" (hint: press the reset button)\n");
+            printf_verbose("Waiting for HID Bootloader device...\n");
+            printf_verbose(" (hint: press the reset button)\n");
 			waited = 1;
 		}
 		delay(0.25);
 	}
-	printf_verbose("Found HalfKay Bootloader\n");
+    printf_verbose("Found HID Bootloader\n");
 
-	if (boot_only) {
+    if (boot_only) {
 		boot(buf, write_size);
 		teensy_close();
 		return 0;
@@ -192,7 +191,7 @@ int main(int argc, char **argv)
 			die("Unknown code/block size\n");
 		}
 		r = teensy_write(buf, write_size, first_block ? 5.0 : 0.5);
-		if (!r) die("error writing to Teensy\n");
+		if (!r) die("error writing to HID Bootloader\n");
 		first_block = 0;
 	}
 	printf_verbose("\n");
@@ -288,7 +287,10 @@ int teensy_open(void)
 {
 	teensy_close();
 	libusb_teensy_handle = open_usb_device(0x16C0, 0x0478);
-	if (libusb_teensy_handle) return 1;
+    if (!libusb_teensy_handle) libusb_teensy_handle = open_usb_device(0x03eb, 0x2067);
+    if (!libusb_teensy_handle) libusb_teensy_handle = open_usb_device(0x03A8, 0x2067);
+
+    if (libusb_teensy_handle) return 1;
 	return 0;
 }
 
@@ -322,7 +324,10 @@ int hard_reboot(void)
 	int r;
 
 	rebootor = open_usb_device(0x16C0, 0x0477);
-	if (!rebootor) return 0;
+    if (!rebootor) rebootor = open_usb_device(0x03eb, 0x2067);
+    if (!rebootor) rebootor = open_usb_device(0x03A8, 0x2067);
+
+    if (!rebootor) return 0;
 	r = usb_control_msg(rebootor, 0x21, 9, 0x0200, 0, "reboot", 6, 100);
 	usb_release_interface(rebootor, 0);
 	usb_close(rebootor);
@@ -335,7 +340,10 @@ int soft_reboot(void)
 	usb_dev_handle *serial_handle = NULL;
 
 	serial_handle = open_usb_device(0x16C0, 0x0483);
-	if (!serial_handle) {
+    if (!serial_handle) serial_handle = open_usb_device(0x03eb, 0x2067);
+    if (!serial_handle) serial_handle = open_usb_device(0x03A8, 0x2067);
+
+    if (!serial_handle) {
 		char *error = usb_strerror();
 		printf("Error opening USB device: %s\n", error);
 		return 0;
@@ -474,7 +482,10 @@ int teensy_open(void)
 {
 	teensy_close();
 	win32_teensy_handle = open_usb_device(0x16C0, 0x0478);
-	if (win32_teensy_handle) return 1;
+    if (!win32_teensy_handle) win32_teensy_handle = open_usb_device(0x03eb, 0x2067);
+    if (!win32_teensy_handle) win32_teensy_handle = open_usb_device(0x03A8, 0x2067);
+
+    if (win32_teensy_handle) return 1;
 	return 0;
 }
 
@@ -509,7 +520,10 @@ int hard_reboot(void)
 	int r;
 
 	rebootor = open_usb_device(0x16C0, 0x0477);
-	if (!rebootor) return 0;
+    if (!rebootor) rebootor = open_usb_device(0x03eb, 0x2067);
+    if (!rebootor) rebootor = open_usb_device(0x03A8, 0x2067);
+
+    if (!rebootor) return 0;
 	r = write_usb_device(rebootor, "reboot", 6, 100);
 	CloseHandle(rebootor);
 	return r;
@@ -667,7 +681,10 @@ int teensy_open(void)
 {
 	teensy_close();
 	iokit_teensy_reference = open_usb_device(0x16C0, 0x0478);
-	if (iokit_teensy_reference) return 1;
+    if (!iokit_teensy_reference) iokit_teensy_reference = open_usb_device(0x03eb, 0x2067);
+    if (!iokit_teensy_reference) iokit_teensy_reference = open_usb_device(0x03A8, 0x2067);
+
+    if (iokit_teensy_reference) return 1;
 	return 0;
 }
 
@@ -705,7 +722,9 @@ int hard_reboot(void)
 	IOReturn ret;
 
 	rebootor = open_usb_device(0x16C0, 0x0477);
-	if (!rebootor) return 0;
+    if (!rebootor) rebootor = open_usb_device(0x03eb, 0x2067);
+    if (!rebootor) rebootor = open_usb_device(0x03A8, 0x2067);
+    if (!rebootor) return 0;
 	ret = IOHIDDeviceSetReport(rebootor,
 		kIOHIDReportTypeOutput, 0, (uint8_t *)("reboot"), 6);
 	close_usb_device(rebootor);
@@ -785,7 +804,10 @@ int teensy_open(void)
 {
 	teensy_close();
 	uhid_teensy_fd = open_usb_device(0x16C0, 0x0478);
-	if (uhid_teensy_fd < 0) return 0;
+    if (uhid_teensy_fd < 0) uhid_teensy_fd = open_usb_device(0x03eb, 0x2067);
+    if (uhid_teensy_fd < 0) uhid_teensy_fd = open_usb_device(0x03A8, 0x2067);
+
+    if (uhid_teensy_fd < 0) return 0;
 	return 1;
 }
 
@@ -812,7 +834,10 @@ int hard_reboot(void)
 	int r, rebootor_fd;
 
 	rebootor_fd = open_usb_device(0x16C0, 0x0477);
-	if (rebootor_fd < 0) return 0;
+    if (rebootor_fd < 0) rebootor_fd = open_usb_device(0x03eb, 0x2067);
+    if (rebootor_fd < 0) rebootor_fd = open_usb_device(0x03A8, 0x2067);
+
+    if (rebootor_fd < 0) return 0;
 	r = write(rebootor_fd, "reboot", 6);
 	delay(0.1);
 	close(rebootor_fd);
