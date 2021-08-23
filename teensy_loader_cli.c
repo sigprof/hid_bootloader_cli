@@ -158,54 +158,70 @@ int main(int argc, char **argv) {
     }
 
     // program the data
-    if (eeprom_write) {
-        printf_verbose("Programming eeprom");
+    if (eeprom_clear) {
+        printf_verbose("Erasing eeprom");
         fflush(stdout);
         for (addr = 0; addr < eeprom_size; addr++) {
-            if (!ihex_bytes_within_range(addr, addr)) {
-                continue;
+            buf[0] = 254;
+            buf[1] = 255;
+            buf[2] = addr & 255;
+            buf[3] = (addr >> 8) & 255;
+            buf[4] = 255;
+            r      = teensy_write(buf, 130, 0.5);
+            if (!r) die("error erasing eeprom\n");
+        }
+    } else if (eeprom_write) {
+        if (eeprom_write) {
+            printf_verbose("Programming eeprom");
+            fflush(stdout);
+            for (addr = 0; addr < eeprom_size; addr++) {
+                if (!ihex_bytes_within_range(addr, addr)) {
+                    continue;
+                }
+                buf[0] = 254;
+                buf[1] = 255;
+                buf[2] = addr & 255;
+                buf[3] = (addr >> 8) & 255;
+                ihex_get_data(addr, 1, buf + 4);
+                r = teensy_write(buf, 130, 0.5);
+                if (!r) die("error writing to eeprom\n");
             }
-            buf[0] = addr & 254;
-            buf[1] = (addr >> 8) & 255;
-            ihex_get_data(addr, 1, buf + 2);
-            r = teensy_write(buf, 130, 0.5);
-            if (!r) die("error writing to eeprom\n");
         }
     } else {
-    printf_verbose("Programming");
-    fflush(stdout);
-    for (addr = 0; addr < code_size; addr += block_size) {
-        if (!first_block && !ihex_bytes_within_range(addr, addr + block_size - 1)) {
-            // don't waste time on blocks that are unused,
-            // but always do the first one to erase the chip
-            continue;
-        }
-        if (!first_block && memory_is_blank(addr, block_size)) continue;
-        printf_verbose(".");
-        if (block_size <= 256 && code_size < 0x10000) {
-            buf[0] = addr & 255;
-            buf[1] = (addr >> 8) & 255;
-            ihex_get_data(addr, block_size, buf + 2);
-            write_size = block_size + 2;
-        } else if (block_size == 256) {
-            buf[0] = (addr >> 8) & 255;
-            buf[1] = (addr >> 16) & 255;
-            ihex_get_data(addr, block_size, buf + 2);
-            write_size = block_size + 2;
-        } else if (block_size == 512 || block_size == 1024) {
-            buf[0] = addr & 255;
-            buf[1] = (addr >> 8) & 255;
-            buf[2] = (addr >> 16) & 255;
-            memset(buf + 3, 0, 61);
-            ihex_get_data(addr, block_size, buf + 64);
-            write_size = block_size + 64;
-        } else {
-            die("Unknown code/block size\n");
-        }
-        r = teensy_write(buf, write_size, first_block ? 5.0 : 0.5);
+        printf_verbose("Programming");
+        fflush(stdout);
+        for (addr = 0; addr < code_size; addr += block_size) {
+            if (!first_block && !ihex_bytes_within_range(addr, addr + block_size - 1)) {
+                // don't waste time on blocks that are unused,
+                // but always do the first one to erase the chip
+                continue;
+            }
+            if (!first_block && memory_is_blank(addr, block_size)) continue;
+            printf_verbose(".");
+            if (block_size <= 256 && code_size < 0x10000) {
+                buf[0] = addr & 255;
+                buf[1] = (addr >> 8) & 255;
+                ihex_get_data(addr, block_size, buf + 2);
+                write_size = block_size + 2;
+            } else if (block_size == 256) {
+                buf[0] = (addr >> 8) & 255;
+                buf[1] = (addr >> 16) & 255;
+                ihex_get_data(addr, block_size, buf + 2);
+                write_size = block_size + 2;
+            } else if (block_size == 512 || block_size == 1024) {
+                buf[0] = addr & 255;
+                buf[1] = (addr >> 8) & 255;
+                buf[2] = (addr >> 16) & 255;
+                memset(buf + 3, 0, 61);
+                ihex_get_data(addr, block_size, buf + 64);
+                write_size = block_size + 64;
+            } else {
+                die("Unknown code/block size\n");
+            }
+            r = teensy_write(buf, write_size, first_block ? 5.0 : 0.5);
             if (!r) die("error writing to Teensy\n");
-        first_block = 0;
-    }
+            first_block = 0;
+        }
     }
     printf_verbose("\n");
 
