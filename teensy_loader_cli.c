@@ -24,7 +24,6 @@
 /* For non-root permissions on ubuntu or similar udev-based linux
  * http://www.pjrc.com/teensy/49-teensy.rules
  */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -41,6 +40,7 @@ void usage(const char *err) {
                     "\t-n : No reboot after programming\n"
                     "\t-b : Boot only, do not program\n"
                     "\t-v : Verbose output\n"
+                    "\t-e : Write eeprom only\n"
                     "\nUse `hid_bootloader_cli --list-mcus` to list supported MCUs.\n"
                     "\nFor more information, please visit:\n"
                     "http://www.pjrc.com/teensy/loader_cli.html\n");
@@ -74,7 +74,9 @@ int         soft_reboot_device        = 0;
 int         reboot_after_programming  = 1;
 int         verbose                   = 0;
 int         boot_only                 = 0;
-int         code_size = 0, block_size = 0;
+int         eeprom_write              = 0;
+int         eeprom_clear              = 0;
+int         code_size = 0, block_size = 0, eeprom_size = 0;
 const char *filename = NULL;
 
 /****************************************************************/
@@ -97,7 +99,7 @@ int main(int argc, char **argv) {
     if (!code_size) {
         usage("MCU type must be specified");
     }
-    printf_verbose("Drashna\'s HID Bootloader, Command Line, Version 2.2\n");
+    printf_verbose("Ubaboot Hid Loader, Command Line, Version 0.1\n");
 
     if (block_size == 512 || block_size == 1024) {
         write_size = block_size + 64;
@@ -110,7 +112,8 @@ int main(int argc, char **argv) {
         // this is done first so any error is reported before using USB
         num = read_intel_hex(filename);
         if (num < 0) die("error reading intel hex file \"%s\"", filename);
-        printf_verbose("Read \"%s\": %d bytes, %.1f%% usage\n", filename, num, (double)num / (double)code_size * 100.0);
+        int temp_size = eeprom_write ? eeprom_size : code_size;
+        printf_verbose("Read \"%s\": %d bytes, %.1f%% usage\n", filename, num, (double)num / (double)temp_size * 100.0);
     }
 
     // open the USB device
@@ -131,7 +134,7 @@ int main(int argc, char **argv) {
         }
         if (!wait_for_device_to_appear) die("Unable to open device (hint: try -w option)\n");
         if (!waited) {
-            printf_verbose("Waiting for HID Bootloader device...\n");
+            printf_verbose("Waiting for HID device...\n");
             printf_verbose(" (hint: press the reset button)\n");
             waited = 1;
         }
@@ -150,10 +153,25 @@ int main(int argc, char **argv) {
     if (waited) {
         num = read_intel_hex(filename);
         if (num < 0) die("error reading intel hex file \"%s\"", filename);
-        printf_verbose("Read \"%s\": %d bytes, %.1f%% usage\n", filename, num, (double)num / (double)code_size * 100.0);
+        int temp_size = eeprom_write ? eeprom_size : code_size;
+        printf_verbose("Read \"%s\": %d bytes, %.1f%% usage\n", filename, num, (double)num / (double)temp_size * 100.0);
     }
 
     // program the data
+    if (eeprom_write) {
+        printf_verbose("Programming eeprom");
+        fflush(stdout);
+        for (addr = 0; addr < eeprom_size; addr++) {
+            if (!ihex_bytes_within_range(addr, addr)) {
+                continue;
+            }
+            buf[0] = addr & 254;
+            buf[1] = (addr >> 8) & 255;
+            ihex_get_data(addr, 1, buf + 2);
+            r = teensy_write(buf, 130, 0.5);
+            if (!r) die("error writing to eeprom\n");
+        }
+    } else {
     printf_verbose("Programming");
     fflush(stdout);
     for (addr = 0; addr < code_size; addr += block_size) {
@@ -185,8 +203,9 @@ int main(int argc, char **argv) {
             die("Unknown code/block size\n");
         }
         r = teensy_write(buf, write_size, first_block ? 5.0 : 0.5);
-        if (!r) die("error writing to HID Bootloader\n");
+            if (!r) die("error writing to Teensy\n");
         first_block = 0;
+    }
     }
     printf_verbose("\n");
 
@@ -1011,31 +1030,32 @@ static const struct {
     const char *name;
     int         code_size;
     int         block_size;
+    int         eeprom_size;
 } MCUs[] = {
-    {"at90usb162", 15872, 128},
-    {"atmega32u4", 32256, 128},
-    {"at90usb646", 64512, 256},
-    {"at90usb1286", 130048, 256},
+    {"at90usb162", 15872, 128, 0},
+    {"atmega32u4", 32256, 128, 1024},
+    {"at90usb646", 64512, 256, 0},
+    {"at90usb1286", 130048, 256, 0},
 #if defined(USE_LIBUSB) || defined(USE_APPLE_IOKIT) || defined(USE_WIN32)
-    {"mkl26z64", 63488, 512},
-    {"mk20dx128", 131072, 1024},
-    {"mk20dx256", 262144, 1024},
-    {"mk66fx1m0", 1048576, 1024},
-    {"mk64fx512", 524288, 1024},
-    {"imxrt1062", 2031616, 1024},
+    {"mkl26z64", 63488, 512, 0},
+    {"mk20dx128", 131072, 1024, 0},
+    {"mk20dx256", 262144, 1024, 0},
+    {"mk66fx1m0", 1048576, 1024, 0},
+    {"mk64fx512", 524288, 1024, 0},
+    {"imxrt1062", 2031616, 1024, 0},
 
     // Add duplicates that match friendly Teensy Names
     // Match board names in boards.txt
-    {"TEENSY2", 32256, 128},
-    {"TEENSY2PP", 130048, 256},
-    {"TEENSYLC", 63488, 512},
-    {"TEENSY30", 131072, 1024},
-    {"TEENSY31", 262144, 1024},
-    {"TEENSY32", 262144, 1024},
-    {"TEENSY35", 524288, 1024},
-    {"TEENSY36", 1048576, 1024},
-    {"TEENSY40", 2031616, 1024},
-    {"TEENSY41", 8126464, 1024},
+    {"TEENSY2", 32256, 128, 0},
+    {"TEENSY2PP", 130048, 256, 0},
+    {"TEENSYLC", 63488, 512, 0},
+    {"TEENSY30", 131072, 1024, 0},
+    {"TEENSY31", 262144, 1024, 0},
+    {"TEENSY32", 262144, 1024, 0},
+    {"TEENSY35", 524288, 1024, 0},
+    {"TEENSY36", 1048576, 1024, 0},
+    {"TEENSY40", 2031616, 1024, 0},
+    {"TEENSY41", 8126464, 1024, 0},
 #endif
     {NULL, 0, 0},
 };
@@ -1057,8 +1077,9 @@ void read_mcu(char *name) {
 
     for (i = 0; MCUs[i].name != NULL; i++) {
         if (strcasecmp(name, MCUs[i].name) == 0) {
-            code_size  = MCUs[i].code_size;
-            block_size = MCUs[i].block_size;
+            code_size   = MCUs[i].code_size;
+            block_size  = MCUs[i].block_size;
+            eeprom_size = MCUs[i].eeprom_size;
             return;
         }
     }
@@ -1088,6 +1109,12 @@ void parse_flag(char *arg) {
                 break;
             case 'b':
                 boot_only = 1;
+                break;
+            case 'e':
+                eeprom_write = 1;
+                break;
+            case 'c':
+                eeprom_clear = 1;
                 break;
             default:
                 fprintf(stderr, "Unknown flag '%c'\n\n", arg[i]);
