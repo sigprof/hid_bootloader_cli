@@ -76,6 +76,7 @@ int         verbose                   = 0;
 int         boot_only                 = 0;
 int         eeprom_write              = 0;
 int         eeprom_clear              = 0;
+int         eeprom_supported          = 0;
 int         code_size = 0, block_size = 0, eeprom_size = 0;
 const char *filename = NULL;
 
@@ -299,7 +300,10 @@ usb_dev_handle *open_usb_device(int vid, int pid) {
                 continue;
             }
 #    endif
-
+            if (dev->descriptor.bcdDevice == 0x1111) {
+                eeprom_supported = 1;
+                printf_verbose("eeprom write supported\n");
+            }
             return h;
         }
     }
@@ -442,6 +446,10 @@ HANDLE open_usb_device(int vid, int pid) {
             CloseHandle(h);
             continue;
         }
+        if (attrib.VersionNumber == 0x1111) {
+            eeprom_supported = 1;
+            printf_verbose("eeprom write supported\n");
+        }
         SetupDiDestroyDeviceInfoList(info);
         return h;
     }
@@ -560,6 +568,7 @@ struct usb_list_struct {
     IOHIDDeviceRef          ref;
     int                     pid;
     int                     vid;
+    int                     bcd;
     struct usb_list_struct *next;
 };
 
@@ -569,7 +578,7 @@ static IOHIDManagerRef         hid_manager = NULL;
 void attach_callback(void *context, IOReturn r, void *hid_mgr, IOHIDDeviceRef dev) {
     CFTypeRef               type;
     struct usb_list_struct *n, *p;
-    int32_t                 pid, vid;
+    int32_t                 pid, vid, bcd;
 
     if (!dev) return;
     type = IOHIDDeviceGetProperty(dev, CFSTR(kIOHIDVendorIDKey));
@@ -579,11 +588,15 @@ void attach_callback(void *context, IOReturn r, void *hid_mgr, IOHIDDeviceRef de
     if (!type || CFGetTypeID(type) != CFNumberGetTypeID()) return;
     if (!CFNumberGetValue((CFNumberRef)type, kCFNumberSInt32Type, &pid)) return;
     n = (struct usb_list_struct *)malloc(sizeof(struct usb_list_struct));
+    type = IOHIDDeviceGetProperty(dev, CFSTR(kIOHIDVersionNumberKey));
+    if (!type || CFGetTypeID(type) != CFNumberGetTypeID()) return;
+    if (!CFNumberGetValue((CFNumberRef)type, kCFNumberSInt32Type, &bcd)) return;
     if (!n) return;
     // printf("attach callback: vid=%04X, pid=%04X\n", vid, pid);
     n->ref  = dev;
     n->vid  = vid;
     n->pid  = pid;
+    n->bcd  = bcd;
     n->next = NULL;
     if (usb_list == NULL) {
         usb_list = n;
@@ -655,7 +668,13 @@ IOHIDDeviceRef open_usb_device(int vid, int pid) {
     for (p = usb_list; p; p = p->next) {
         if (p->vid == vid && p->pid == pid) {
             ret = IOHIDDeviceOpen(p->ref, kIOHIDOptionsTypeNone);
-            if (ret == kIOReturnSuccess) return p->ref;
+            if (ret == kIOReturnSuccess) {
+                if (p->bcd == 0x1111) {
+                    eeprom_supported = 1;
+                    printf_verbose("eeprom write supported\n");
+                }
+                return p->ref;
+            }
         }
     }
     return NULL;
@@ -777,6 +796,10 @@ int open_usb_device(int vid, int pid) {
         }
         // printf("%s: v=%d, p=%d\n", buf, info.udi_vendorNo, info.udi_productNo);
         if (info.udi_vendorNo == vid && info.udi_productNo == pid) {
+            if (info.udi_releaseNo == 0x1111) {
+                eeprom_supported = 1;
+                printf_verbose("eeprom write supported\n");
+            }
             closedir(dir);
             return fd;
         }
