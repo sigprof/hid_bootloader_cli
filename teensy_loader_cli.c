@@ -40,7 +40,8 @@ void usage(const char *err) {
                     "\t-n : No reboot after programming\n"
                     "\t-b : Boot only, do not program\n"
                     "\t-v : Verbose output\n"
-                    "\t-e : Write eeprom only\n"
+                    "\t-e : Write EEPROM only\n"
+                    "\t-c : Clear EEPROM only\n"
                     "\nUse `hid_bootloader_cli --list-mcus` to list supported MCUs.\n"
                     "\nFor more information, please visit:\n"
                     "http://www.pjrc.com/teensy/loader_cli.html\n");
@@ -58,6 +59,7 @@ int  soft_reboot(void);
 int  read_intel_hex(const char *filename);
 int  ihex_bytes_within_range(int begin, int end);
 void ihex_get_data(int addr, int len, unsigned char *bytes);
+void ihex_get_data_with_mask(int addr, int len, unsigned char *bytes);
 int  memory_is_blank(int addr, int block_size);
 
 // Misc stuff
@@ -90,24 +92,26 @@ int main(int argc, char **argv) {
     int           num, addr, r, write_size;
 
     int first_block = 1, waited = 0;
+    int eeprom_block_size;
 
     // parse command line arguments
     parse_options(argc, argv);
-    if (!filename && !boot_only) {
+    if (!filename && !boot_only && !eeprom_clear) {
         usage("Filename must be specified");
     }
     if (!code_size) {
         usage("MCU type must be specified");
     }
-    printf_verbose("Ubaboot Hid Loader, Command Line, Version 0.1\n");
+    printf_verbose("nanoBoot HID Loader, Command Line, Version 0.1\n");
 
     if (block_size == 512 || block_size == 1024) {
         write_size = block_size + 64;
     } else {
         write_size = block_size + 2;
     };
+    eeprom_block_size = block_size / 2;
 
-    if (!boot_only) {
+    if (!boot_only && !eeprom_clear) {
         // read the intel hex file
         // this is done first so any error is reported before using USB
         num = read_intel_hex(filename);
@@ -150,7 +154,7 @@ int main(int argc, char **argv) {
 
     // if we waited for the device, read the hex file again
     // perhaps it changed while we were waiting?
-    if (waited) {
+    if (waited && !eeprom_clear) {
         num = read_intel_hex(filename);
         if (num < 0) die("error reading intel hex file \"%s\"", filename);
         int temp_size = eeprom_write ? eeprom_size : code_size;
@@ -158,34 +162,37 @@ int main(int argc, char **argv) {
     }
 
     // program the data
-    if (eeprom_clear) {
-        printf_verbose("Erasing eeprom");
-        fflush(stdout);
-        for (addr = 0; addr < eeprom_size; addr++) {
-            buf[0] = 254;
-            buf[1] = 255;
-            buf[2] = addr & 255;
-            buf[3] = (addr >> 8) & 255;
-            buf[4] = 255;
-            r      = teensy_write(buf, 130, 0.5);
-            if (!r) die("error erasing eeprom\n");
+    if (eeprom_clear || eeprom_write) {
+        if (eeprom_clear) {
+            printf_verbose("Erasing EEPROM");
+        } else {
+            printf_verbose("Programming EEPROM");
         }
-    } else if (eeprom_write) {
-        if (eeprom_write) {
-            printf_verbose("Programming eeprom");
-            fflush(stdout);
-            for (addr = 0; addr < eeprom_size; addr++) {
-                if (!ihex_bytes_within_range(addr, addr)) {
-                    continue;
+        fflush(stdout);
+        for (addr = 0; addr < eeprom_size; addr += eeprom_block_size) {
+            if (!eeprom_clear && !ihex_bytes_within_range(addr, addr + eeprom_block_size - 1))
+                continue;
+            printf_verbose(".");
+            if (block_size <= 256 && code_size < 0x10000) {
+                buf[0] = (addr & 255) | 0x02;
+                buf[1] = (addr >> 8) & 255;
+                if (eeprom_clear) {
+                    for (int i = 0; i < eeprom_block_size; ++i) {
+                        buf[2 + 2*i] = 255;
+                        buf[2 + 2*i + 1] = 1;
+                    }
+                } else {
+                    ihex_get_data_with_mask(addr, eeprom_block_size, buf + 2);
                 }
-                buf[0] = 254;
-                buf[1] = 255;
-                buf[2] = addr & 255;
-                buf[3] = (addr >> 8) & 255;
-                ihex_get_data(addr, 1, buf + 4);
-                r = teensy_write(buf, 130, 0.5);
-                if (!r) die("error writing to eeprom\n");
+                write_size = block_size + 2;
+            } else {
+                die("Unimplemented code/block size for EEPROM write\n");
             }
+            // EEPROM writes on AVR chips typically take 3.3 ms per byte;
+            // use 8 ms per byte for the timeout.
+            r = teensy_write(buf, write_size, 0.008 * eeprom_block_size);
+            if (!r) die("error writing EEPROM data\n");
+            first_block = 0;
         }
     } else {
         printf_verbose("Programming");
@@ -986,6 +993,28 @@ void ihex_get_data(int addr, int len, unsigned char *bytes) {
             bytes[i] = firmware_image[addr];
         } else {
             bytes[i] = 255;
+        }
+        addr++;
+    }
+}
+
+void ihex_get_data_with_mask(int addr, int len, unsigned char *bytes) {
+    int i;
+
+    if (addr < 0 || len < 0 || addr + len >= MAX_MEMORY_SIZE) {
+        for (i = 0; i < len; i++) {
+            bytes[i*2] = 255;
+            bytes[i*2 + 1] = 0;
+        }
+        return;
+    }
+    for (i = 0; i < len; i++) {
+        if (firmware_mask[addr]) {
+            bytes[i*2] = firmware_image[addr];
+            bytes[i*2 + 1] = 1;
+        } else {
+            bytes[i*2] = 255;
+            bytes[i*2 + 1] = 0;
         }
         addr++;
     }
